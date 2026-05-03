@@ -22,15 +22,33 @@ LDFLAGS ?= -pthread
 
 ifeq ($(OS),Windows_NT)
 EXEEXT  = .exe
-MKDIR_P = if not exist "$(BIN_DIR)" mkdir "$(BIN_DIR)"
-RM_RF   = if exist "$(BIN_DIR)" rmdir /S /Q "$(BIN_DIR)"
-RUN_TEST = set BIN=$(BIN)&& bash test/run_tests.sh
-RUN_BENCH = set BIN=$(BIN)&& bash test/bench.sh
 else
 EXEEXT  =
-MKDIR_P = mkdir -p "$(BIN_DIR)"
-RM_RF   = rm -rf "$(BIN_DIR)"
-RUN_TEST = BIN="$(BIN)" bash test/run_tests.sh
+endif
+
+# Detect whether we are being driven by a POSIX-style shell (MSYS2, Cygwin, Git
+# Bash, WSL) vs cmd.exe. Under MSYS2 $(OS) is still "Windows_NT" but $$MSYSTEM
+# is set and /bin/sh is bash, so cmd-syntax recipes (`if exist ...`) fail with
+# "syntax error: unexpected end of file".
+ifeq ($(OS),Windows_NT)
+ifeq ($(MSYSTEM),)
+WIN_CMD_SHELL := 1
+else
+WIN_CMD_SHELL :=
+endif
+else
+WIN_CMD_SHELL :=
+endif
+
+ifdef WIN_CMD_SHELL
+MKDIR_P   = if not exist "$(BIN_DIR)" mkdir "$(BIN_DIR)"
+RM_RF     = if exist "$(BIN_DIR)" rmdir /S /Q "$(BIN_DIR)"
+RUN_TEST  = set BIN=$(BIN)&& bash test/run_tests.sh
+RUN_BENCH = set BIN=$(BIN)&& bash test/bench.sh
+else
+MKDIR_P   = mkdir -p "$(BIN_DIR)"
+RM_RF     = rm -rf "$(BIN_DIR)"
+RUN_TEST  = BIN="$(BIN)" bash test/run_tests.sh
 RUN_BENCH = BIN="$(BIN)" bash test/bench.sh
 endif
 
@@ -135,13 +153,13 @@ endif
 
 release: release-archive checksums
 	@echo "release artifacts in $(RELEASE_DIR):"
-ifeq ($(OS),Windows_NT)
+ifdef WIN_CMD_SHELL
 	@dir /B "$(subst /,\,$(RELEASE_DIR))"
 else
 	@ls -1 "$(RELEASE_DIR)"
 endif
 
-ifeq ($(OS),Windows_NT)
+ifdef WIN_CMD_SHELL
 # ----- Windows native make (cmd.exe shell) ---------------------------------
 RELEASE_DIR_W := $(subst /,\,$(RELEASE_DIR))
 STAGE_DIR_W   := $(RELEASE_DIR_W)\$(RELEASE_NAME)
