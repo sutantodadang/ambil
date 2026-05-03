@@ -1,0 +1,10 @@
+2026-05-01 09:59:58 INFO  app started pid=1234
+2026-05-01 10:00:01 INFO  request id=req-001 path=/health status=200
+2026-05-01 10:00:02 WARN  request id=req-002 path=/login status=401 latency=45ms
+2026-05-01 10:00:03 ERROR request id=req-003 path=/api/users status=500 error="db timeout"
+2026-05-01 10:15:00 INFO  request id=req-004 path=/health status=200
+2026-05-01 10:30:11 ERROR request id=req-005 path=/api/orders status=500 error="upstream 503"
+2026-05-01 10:59:59 INFO  request id=req-006 path=/health status=200
+2026-05-01 11:00:00 INFO  request id=req-007 path=/health status=200
+2026-05-01 11:00:01 ERROR request id=req-008 path=/api/billing status=500 error="panic"
+2026-05-01 12:00:00 INFO  shutting down pid=1234

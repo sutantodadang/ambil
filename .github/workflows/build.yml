@@ -1,0 +1,173 @@
+name: build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed by release job (softprops/action-gh-release)
+
+jobs:
+  # ------------------------------------------------------------------
+  # Native builds — one job per (os, arch) so we exercise real test
+  # suites where possible. Cross builds run only the build step.
+  # ------------------------------------------------------------------
+  build:
+    name: build (${{ matrix.target_os }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target_os: linux
+            arch: x86_64
+            cc: gcc
+            cross: false
+            archive_ext: tar.gz
+          - runner: ubuntu-latest
+            target_os: linux
+            arch: aarch64
+            cc: aarch64-linux-gnu-gcc
+            cross: true
+            archive_ext: tar.gz
+          - runner: windows-latest
+            target_os: windows
+            arch: x86_64
+            cc: gcc
+            cross: false
+            archive_ext: zip
+
+    defaults:
+      run:
+        # Use bash on every runner (Windows includes Git-Bash).
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # --- toolchain --------------------------------------------------
+      - name: install toolchain (linux native)
+        if: matrix.target_os == 'linux' && matrix.cross == false
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential
+
+      - name: install toolchain (linux cross aarch64)
+        if: matrix.target_os == 'linux' && matrix.cross == true && matrix.arch == 'aarch64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
+            qemu-user-static
+
+      - name: install toolchain (windows)
+        if: matrix.target_os == 'windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          install: >-
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-make
+            zip
+          update: false
+          path-type: inherit
+
+      # --- resolve version (tag → strip refs/tags/, else short sha) --
+      - name: compute VERSION
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "value=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=v0.0.0-${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # --- build ------------------------------------------------------
+      - name: build (linux)
+        if: matrix.target_os == 'linux'
+        env:
+          CC: ${{ matrix.cc }}
+        run: |
+          # Cross builds: disable -march=native.
+          if [[ "${{ matrix.cross }}" == "true" ]]; then
+            make NATIVE=0 CC="$CC"
+          else
+            make CC="$CC"
+          fi
+
+      - name: build (windows)
+        if: matrix.target_os == 'windows'
+        shell: msys2 {0}
+        run: |
+          mingw32-make NATIVE=0
+
+      # --- test (skip cross builds; qemu is flaky for pthread) -------
+      - name: test (linux native)
+        if: matrix.target_os == 'linux' && matrix.cross == false
+        run: make test
+
+      - name: test (windows)
+        if: matrix.target_os == 'windows'
+        shell: msys2 {0}
+        run: mingw32-make test
+
+      # --- package release archive (matches install scripts naming) --
+      - name: package
+        env:
+          VERSION: ${{ steps.ver.outputs.value }}
+          TARGET_OS: ${{ matrix.target_os }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          if [[ "${{ matrix.target_os }}" == "windows" ]]; then
+            # Run inside msys2 so make + zip are available.
+            export MSYSTEM=MINGW64
+          fi
+          make release VERSION="$VERSION" TARGET_OS="$TARGET_OS" ARCH="$ARCH"
+
+      - name: list artifacts
+        run: ls -la build/release
+
+      - name: upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ambil-${{ steps.ver.outputs.value }}-${{ matrix.arch }}-${{ matrix.target_os }}
+          path: |
+            build/release/ambil-*.tar.gz
+            build/release/ambil-*.zip
+            build/release/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14
+
+  # ------------------------------------------------------------------
+  # Release job: only on tag push. Collects every matrix artifact,
+  # merges SHA256SUMS, attaches everything to the GitHub Release.
+  # ------------------------------------------------------------------
+  release:
+    name: github release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: flatten + merge SHA256SUMS
+        run: |
+          mkdir -p release
+          # Move every archive to a flat dir.
+          find dist -type f \( -name 'ambil-*.tar.gz' -o -name 'ambil-*.zip' \) \
+            -exec cp {} release/ \;
+          # Concatenate every per-job SHA256SUMS, dedup, sort.
+          find dist -name SHA256SUMS -type f -exec cat {} + \
+            | sort -u > release/SHA256SUMS
+          ls -la release
+
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: true

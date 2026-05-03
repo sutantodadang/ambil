@@ -1,0 +1,10 @@
+{"ts":"2026-05-01T10:00:01Z","level":"info","msg":"server started","pid":1234}
+{"ts":"2026-05-01T10:00:02Z","level":"info","msg":"request","path":"/health","status":200}
+{"ts":"2026-05-01T10:00:03Z","level":"warn","msg":"slow query","duration_ms":420}
+{"ts":"2026-05-01T10:00:04Z","level":"error","msg":"db timeout","retry":1}
+{"ts":"2026-05-01T10:00:05Z","level":"info","msg":"request","path":"/login","status":200}
+{"ts":"2026-05-01T10:00:06Z","level":"error","msg":"upstream failure","status":503}
+{"ts":"2026-05-01T10:00:07Z","level":"debug","msg":"cache hit","key":"user:42"}
+{"ts":"2026-05-01T10:00:08Z","level":"info","msg":"request","path":"/api/orders","status":201}
+{"ts":"2026-05-01T10:00:09Z","level":"error","msg":"validation","field":"email"}
+{"ts":"2026-05-01T10:00:10Z","level":"warn","msg":"deprecated endpoint","path":"/v1/users"}
