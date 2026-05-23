@@ -3,3 +3,4 @@ build/
 *.d
 *.log.bak
 .vscode/
+.claude/

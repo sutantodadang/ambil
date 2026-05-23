@@ -54,6 +54,8 @@ if [[ ! -x "$BIN" ]]; then
     exit 2
 fi
 
+echo "ambil SIMD path: $($BIN --simd-info 2>/dev/null || echo 'unknown')"
+
 cleanup() {
     if [[ "$KEEP" -ne 1 ]]; then rm -f "$TMP"; fi
 }
@@ -92,7 +94,7 @@ J_FLAG=""
 
 run() {
     local label="$1"; shift
-    local out_file rc start end elapsed bytes lines
+    local out_file rc start end elapsed bytes lines mbps
     out_file="$(mktemp)"
     start=$(date +%s.%N)
     if "$@" > "$out_file" 2>/dev/null; then rc=0; else rc=$?; fi
@@ -100,8 +102,12 @@ run() {
     elapsed=$(awk -v s="$start" -v e="$end" 'BEGIN{printf "%.3f", e-s}')
     bytes=$(stat -c %s "$out_file" 2>/dev/null || stat -f %z "$out_file")
     lines=$(wc -l < "$out_file" | tr -d ' ')
+    # MB/s is the corpus scanned divided by wall time; uses ${actual} from outer
+    # scope when set (file bench), else 0 (dir-tree bench computes its own).
+    local scan_bytes="${BENCH_BYTES:-${actual:-0}}"
+    mbps=$(awk -v b="$scan_bytes" -v t="$elapsed" 'BEGIN{ if (t>0) printf "%.0f", b/t/1024/1024; else print "-"; }')
     rm -f "$out_file"
-    printf "  %-40s %8ss  rc=%d  out=%dB/%dL\n" "$label" "$elapsed" "$rc" "$bytes" "$lines"
+    printf "  %-40s %8ss  %6s MB/s  rc=%d  out=%dB/%dL\n" "$label" "$elapsed" "$mbps" "$rc" "$bytes" "$lines"
 }
 
 drop_caches() {
@@ -131,11 +137,6 @@ run "grep   'ZZZNOMATCH' (pure scan)"     grep "ZZZNOMATCH" "$TMP"
 if command -v rg >/dev/null 2>&1; then
     run "ripgrep 'ZZZNOMATCH'"            rg --no-heading --color=never "ZZZNOMATCH" "$TMP"
 fi
-run "ambil --count-field level"         "$BIN" --count-field level $J_FLAG "$HOST_TMP"
-if command -v jq >/dev/null 2>&1; then
-    run "jq -r .level | sort | uniq -c"  bash -c "jq -r .level '$TMP' | sort | uniq -c"
-fi
-run "ambil --json --field level=error"  "$BIN" --no-color --log-json --field level=error $J_FLAG "$HOST_TMP"
 
 # ===========================================================================
 # Recursive directory bench: synthesize a fake source tree and grep through it.
@@ -149,6 +150,8 @@ trap 'cleanup; cleanup_dir' EXIT
 
 echo
 echo "Generating synthetic source tree at $DIR_TMP (~50 MB across many .c files)"
+# Reset BENCH_BYTES for the directory section (~50 MB).
+export BENCH_BYTES=$(( 50 * 1024 * 1024 ))
 # 500 files * ~100 KB each = ~50 MB
 awk -v dir="$DIR_TMP" -v files=500 -v lines_per=2000 '
 BEGIN {
